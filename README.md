@@ -23,7 +23,6 @@ Após a autenticação bem-sucedida, o sistema permite o envio de mensagens crip
 ### 1. Instalação das Dependências
 
 ```bash
-cd server
 npm install
 ```
 
@@ -57,7 +56,6 @@ IPINFO_API_KEY=sua_chave_ipinfo_aqui
 Primeiro, inicie os containers Docker que hospedam o PostgreSQL e os dois Redis (Redis do Cliente e Redis do Servidor):
 
 ```bash
-cd server
 docker-compose up -d
 ```
 
@@ -98,11 +96,10 @@ npm run client
 O cliente interativo oferece um menu com as seguintes opções:
 
 1. **Registrar novo usuário**: Cria um novo usuário no sistema
-2. **Ver histórico de registros**: Visualiza os usuários registrados
+2. **Login completo (3FA)**: Realiza autenticação completa com 3 fatores
 3. **Testar conexão Redis**: Verifica a conexão com o Redis
 4. **Verificar secret armazenado**: Consulta o secret TOTP de um usuário
 5. **Solicitar código TOTP**: Gera códigos TOTP em tempo real
-6. **Login completo (3FA)**: Realiza autenticação completa com 3 fatores
 0. **Sair**: Encerra o cliente
 
 ### Fluxo de Uso Típico
@@ -110,7 +107,7 @@ O cliente interativo oferece um menu com as seguintes opções:
 1. Registre um novo usuário (opção 1)
 2. Verifique se o secret foi armazenado corretamente (opção 4)
 3. Gere um código TOTP (opção 5)
-4. Realize o login completo (opção 6)
+4. Realize o login completo (opção 2)
 5. Envie uma mensagem criptografada quando solicitado
 
 ## Simulação de Diferentes Localizações
