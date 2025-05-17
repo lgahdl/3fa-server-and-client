@@ -148,7 +148,9 @@ docker-compose down
 - Geração TOTP: Biblioteca otplib
 - Criptografia de mensagens: AES-256-GCM
 - Armazenamento de secrets: Redis
-- Detecção de país: API IPInfo 
+- Detecção de país: API IPInfo
+- Framework Backend: Hono
+- ORM: Drizzle ORM
 
 ## Fluxos do Sistema
 
