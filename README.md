@@ -107,13 +107,22 @@ O cliente interativo oferece um menu com as seguintes opções:
 
 ## Simulação de Diferentes Localizações
 
-O cliente permite simular requisições de diferentes países usando IPs predefinidos:
-- Brasil: 200.152.38.1
-- EUA: 8.8.8.8
-- UK: 176.32.103.205
-- Japão: 203.104.153.1
+O cliente oferece duas opções para o endereço IP usado nas requisições:
 
-Para testes mais realistas, recomenda-se o uso de uma VPN para alterar o IP real.
+1. **Usar o IP real do usuário:**
+   - Detecta e utiliza automaticamente o IP público real da sua conexão
+   - Útil para testes reais de verificação geográfica
+
+2. **Simular IPs de diferentes países:**
+   - Brasil: 200.152.38.1
+   - EUA: 8.8.8.8
+   - UK: 176.32.103.205
+   - Japão: 203.104.153.1
+   - Opção para digitar manualmente qualquer IP
+
+Durante o registro ou login, o cliente perguntará qual IP você deseja utilizar, permitindo escolher entre seu IP real ou um IP simulado.
+
+Para testes mais avançados de localização, recomenda-se o uso de uma VPN para alterar fisicamente o IP real.
 
 ## Acesso ao PgAdmin
 
