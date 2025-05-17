@@ -129,7 +129,7 @@ Para gerenciar o banco de dados PostgreSQL:
    - Senha: admin
 3. Adicione um novo servidor:
    - Host: postgres-db
-   - Porta: 5432
+   - Porta: 5433
    - Usuário: postgres
    - Senha: postgres
    - Database: app_db
@@ -139,13 +139,12 @@ Para gerenciar o banco de dados PostgreSQL:
 Para parar os containers Docker:
 
 ```bash
-cd server
 docker-compose down
 ```
 
 ## Detalhes Técnicos
 
-- Autenticação de senha: Algoritmo Scrypt
+- Hash de senha: Algoritmo Scrypt
 - Geração TOTP: Biblioteca otplib
 - Criptografia de mensagens: AES-256-GCM
 - Armazenamento de secrets: Redis
