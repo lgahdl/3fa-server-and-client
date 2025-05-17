@@ -97,18 +97,13 @@ O cliente interativo oferece um menu com as seguintes opções:
 
 1. **Registrar novo usuário**: Cria um novo usuário no sistema
 2. **Login completo (3FA)**: Realiza autenticação completa com 3 fatores
-3. **Testar conexão Redis**: Verifica a conexão com o Redis
-4. **Verificar secret armazenado**: Consulta o secret TOTP de um usuário
-5. **Solicitar código TOTP**: Gera códigos TOTP em tempo real
 0. **Sair**: Encerra o cliente
 
 ### Fluxo de Uso Típico
 
 1. Registre um novo usuário (opção 1)
-2. Verifique se o secret foi armazenado corretamente (opção 4)
-3. Gere um código TOTP (opção 5)
-4. Realize o login completo (opção 2)
-5. Envie uma mensagem criptografada quando solicitado
+2. Realize o login completo (opção 2)
+3. Envie uma mensagem criptografada quando solicitado
 
 ## Simulação de Diferentes Localizações
 
@@ -151,6 +146,7 @@ docker-compose down
 - Detecção de país: API IPInfo
 - Framework Backend: Hono
 - ORM: Drizzle ORM
+- Derivação de chaves: PBKDF2 (100.000 iterações, SHA-256)
 
 ## Fluxos do Sistema
 
@@ -174,7 +170,7 @@ sequenceDiagram
     Servidor->>Postgres: Salva usuário (nome, número, país, hash, salt)
     Postgres-->>Servidor: Confirmação
     
-    Note over Servidor: Gera secret = Hash(senha + salt)
+    Note over Servidor: Gera secret = PBKDF2(senha + salt)
     
     Servidor->>Redis: Armazena secret com chave = número_celular
     Redis-->>Servidor: Confirmação
@@ -219,7 +215,8 @@ sequenceDiagram
     Redis-->>Servidor: Secret do usuário
     
     Note over Servidor: Verifica código TOTP usando secret
-    Note over Servidor: Gera chave simétrica e IV aleatório
+    Note over Servidor: Deriva chave simétrica usando PBKDF2
+    Note over Servidor: Gera IV aleatório para AES-GCM
     
     Servidor-->>Cliente: Autenticação 3FA completa (chave de sessão, IV)
 ```
@@ -235,7 +232,7 @@ sequenceDiagram
     Note right of Cliente: Após Login 3FA bem-sucedido
 
     Note over Servidor: Armazena código TOTP usado na verificação
-    Servidor->>Redis: Salva {totp_code, iv, timestamp} com TTL de 5 min
+    Servidor->>Redis: Salva {totp_code, derivation_salt, iv, timestamp} com TTL de 5 min
     
     Note over Cliente: Possui chave de sessão e IV do servidor
     Note over Cliente: Usuário digita mensagem
@@ -245,16 +242,11 @@ sequenceDiagram
     
     Cliente->>Servidor: POST /send-message (mensagem cifrada, IV, número_celular)
     
-    Servidor->>Redis: Recupera secret do usuário
-    Redis-->>Servidor: Secret do usuário
+    Servidor->>Redis: Recupera secret e dados da sessão do usuário
+    Redis-->>Servidor: Secret e dados da sessão
     
-    Servidor->>Redis: Recupera código TOTP salvo da sessão
-    Redis-->>Servidor: Dados da sessão {totp_code, iv, timestamp}
-    
-    Note over Servidor: Deriva mesma chave simétrica usando TOTP salvo + secret
-    
-    Note over Servidor: Descriptografa a mensagem com AES-256-GCM
-    Note over Servidor: Verifica tag de autenticação
+    Note over Servidor: Reconstrói a mesma chave simétrica usando PBKDF2
+    Note over Servidor: Descriptografa a mensagem
     
     Servidor-->>Cliente: Confirmação e mensagem descriptografada
 ``` 

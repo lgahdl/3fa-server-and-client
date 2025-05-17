@@ -1,6 +1,6 @@
 import { Context } from 'hono';
 import { UserService } from '../services/user.service';
-import { PasswordUtil } from '../utils/password';
+import { EncryptUtils } from '../utils/encrypt-utils';
 import { IPInfoService } from '../services/ipinfo.service';
 import RedisService from '../services/redis.service';
 import crypto from 'crypto';
@@ -51,10 +51,10 @@ export class UserController {
       }
       
       // Gerar salt para a senha
-      const salt = PasswordUtil.generateSalt();
+      const salt = EncryptUtils.generateSalt();
       
       // Encriptar a senha usando SCRYPT
-      const senhaEncriptada = await PasswordUtil.hash(body.senha, salt);
+      const senhaEncriptada = await EncryptUtils.hash(body.senha, salt);
       
       // Registrar o usuário com o país detectado
       const result = await UserService.register({
@@ -72,9 +72,9 @@ export class UserController {
         }, 400);
       }
       
-      // Gerar o "secret" combinando senha + salt e aplicando hash
+      // Gerar o "secret" usando PBKDF2
       const secretInput = `${body.senha}${salt}`;
-      const secretHash = crypto.createHash('sha256').update(secretInput).digest('hex');
+      const secretHash = await EncryptUtils.generateSecret(secretInput, salt);
       
       // Armazenar o secret no Redis do servidor com a chave sendo o número de celular
       await RedisService.set(body.numero_celular, secretHash);
@@ -193,7 +193,7 @@ export class UserController {
       }
       
       // Verificar se a senha está correta
-      const senhaCorreta = await PasswordUtil.verify(body.senha, usuario.senha, usuario.salt);
+      const senhaCorreta = await EncryptUtils.verify(body.senha, usuario.senha, usuario.salt);
       
       if (!senhaCorreta) {
         return c.json({
@@ -292,19 +292,25 @@ export class UserController {
         }, 401);
       }
       
-      // Derivar chave simétrica a partir do código TOTP + secret
-      // A mesma chave deve ser derivável no lado do cliente para criptografar a mensagem
+      // Gerar um salt aleatório para PBKDF2
+      const derivationSalt = crypto.randomBytes(16);
+      
+      // Derivar chave simétrica a partir do código TOTP + secret usando PBKDF2
       const keyMaterial = `${body.totp_code}${secret}`;
-      const symmetricKey = crypto.createHash('sha256').update(keyMaterial).digest('hex');
+      
+      // Usar função do EncryptUtils para derivar a chave simétrica
+      const symmetricKeyBuffer = await EncryptUtils.deriveSymmetricKey(keyMaterial, derivationSalt);
+      const symmetricKey = symmetricKeyBuffer.toString('hex');
       
       // Gerar um IV (Initialization Vector) aleatório
-      const iv = crypto.randomBytes(16); // 16 bytes para AES
+      const iv = EncryptUtils.generateIV(); // 16 bytes para AES
       
       // Armazenar o código TOTP usado na autenticação junto com a sessão
       // usando uma chave composta no Redis para associar ao usuário
       const sessionKey = `session:${body.numero_celular}`;
       const sessionData = {
         totp_code: body.totp_code,
+        derivation_salt: derivationSalt.toString('hex'), // Salvar o salt usado na derivação
         iv: iv.toString('hex'),
         timestamp: Date.now()
       };
@@ -370,23 +376,15 @@ export class UserController {
       // Converter os dados da sessão de JSON para objeto
       const sessionData = JSON.parse(sessionDataJson);
       
-      // Usar o código TOTP armazenado durante a autenticação
+      // Usar o código TOTP armazenado durante a autenticação e o salt de derivação
       const savedTOTP = sessionData.totp_code;
+      const derivationSalt = Buffer.from(sessionData.derivation_salt, 'hex');
+      
       console.log(`Usando código TOTP armazenado: ${savedTOTP}`);
       
-      // Derivar chave simétrica a partir do código TOTP armazenado + secret
+      // Derivar chave simétrica usando o EncryptUtils
       const keyMaterial = `${savedTOTP}${secret}`;
-      const symmetricKeyHex = crypto.createHash('sha256').update(keyMaterial).digest('hex');
-      
-      // A chave para AES-256-GCM deve ter exatamente 32 bytes
-      let symmetricKey = Buffer.from(symmetricKeyHex, 'hex').slice(0, 32);
-      
-      // Se a chave é menor que 32 bytes, preenchemos com zeros
-      if (symmetricKey.length < 32) {
-        const newKey = Buffer.alloc(32);
-        symmetricKey.copy(newKey);
-        symmetricKey = newKey;
-      }
+      const symmetricKey = await EncryptUtils.deriveSymmetricKey(keyMaterial, derivationSalt);
       
       console.log(`Tamanho da chave: ${symmetricKey.length} bytes`);
       
@@ -396,19 +394,13 @@ export class UserController {
       
       // Descriptografar a mensagem
       try {
-        const decipher = crypto.createDecipheriv('aes-256-gcm', symmetricKey, ivBuffer);
-        
         // Separar o texto cifrado e a tag de autenticação
         const encryptedDataBuffer = Buffer.from(body.encrypted_message, 'hex');
         const ciphertext = encryptedDataBuffer.slice(0, -16); // Últimos 16 bytes são a tag de autenticação
         const authTag = encryptedDataBuffer.slice(-16);
         
-        decipher.setAuthTag(authTag);
-        
-        let decrypted = decipher.update(ciphertext);
-        decrypted = Buffer.concat([decrypted, decipher.final()]);
-        
-        const message = decrypted.toString('utf8');
+        // Usar a função de descriptografia do EncryptUtils
+        const message = EncryptUtils.decrypt(ciphertext, authTag, symmetricKey, ivBuffer);
         
         return c.json({
           success: true,

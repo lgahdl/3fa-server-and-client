@@ -42,6 +42,7 @@ totp.options = {
   window: 1, // Permitir uma pequena janela de tempo antes/depois
 };
 
+
 // Inicializar conexão com o Redis
 async function initRedis() {
   try {
@@ -236,140 +237,6 @@ async function registrarUsuario() {
   await menuPrincipal();
 }
 
-// Testar conexão com Redis
-async function testarRedis() {
-  console.log("\n=== TESTE DE CONEXÃO COM REDIS ===");
-
-  try {
-    const response = await axios.get(`${BASE_URL}/api/redis-test`);
-    console.log("Resposta do servidor:");
-    console.log(JSON.stringify(response.data, null, 2));
-  } catch (error) {
-    console.error("Erro ao testar Redis:", error.message);
-    if (error.response) {
-      console.error("Dados da resposta:", error.response.data);
-    }
-  }
-
-  await menuPrincipal();
-}
-
-// Verificar secret armazenado
-async function verificarSecret() {
-  console.log("\n=== VERIFICAR SECRET ARMAZENADO ===");
-
-  if (!redisClient) {
-    console.log("❌ Conexão com Redis não está disponível.");
-    return await menuPrincipal();
-  }
-
-  const numeroCelular = await pergunta(
-    "Digite o número de celular para verificar o secret: "
-  );
-
-  try {
-    const secret = await redisClient.get(numeroCelular);
-
-    if (secret) {
-      console.log(`\n✅ Secret encontrado para o número ${numeroCelular}:`);
-      console.log(`🔑 ${secret}`);
-    } else {
-      console.log(
-        `\n❌ Nenhum secret encontrado para o número ${numeroCelular}`
-      );
-    }
-  } catch (error) {
-    console.error("Erro ao verificar secret:", error);
-  }
-
-  await menuPrincipal();
-}
-
-// Função para solicitar código TOTP
-async function solicitarTOTP() {
-  console.log("\n=== GERAÇÃO DE CÓDIGO TOTP ===");
-  console.log("Pressione ESC a qualquer momento para voltar ao menu principal");
-
-  if (!redisClient) {
-    console.log("❌ Conexão com Redis não está disponível.");
-    console.log("Necessário para verificar o secret armazenado.");
-    return await menuPrincipal();
-  }
-
-  const numeroCelular = await pergunta("Digite o número de celular: ");
-
-  try {
-    // Verificar se temos o secret armazenado para este número
-    const secret = await redisClient.get(numeroCelular);
-
-    if (!secret) {
-      console.log(
-        `\n❌ Nenhum secret encontrado para o número ${numeroCelular}`
-      );
-      console.log("É necessário registrar o usuário primeiro.");
-      return await menuPrincipal();
-    }
-
-    console.log(`\n✅ Secret encontrado para o número ${numeroCelular}.`);
-
-    // Loop para gerar e mostrar códigos TOTP continuamente até ESC ser pressionado
-    while (!escPressed) {
-      // Gerar um novo código TOTP
-      const code = totp.generate(secret);
-
-      // Obter tempo restante (arredondando para cima para evitar mostrar 0)
-      const remainingTime = totp.timeRemaining();
-
-      // Gerar chave para o Redis
-      const redisKey = `${numeroCelular}-totp`;
-
-      // Dados a serem armazenados
-      const totpData = {
-        code,
-        timestamp: Date.now(),
-        secret,
-        expires_at: Date.now() + remainingTime * 1000,
-      };
-
-      // Armazenar no Redis
-      await redisClient.set(redisKey, JSON.stringify(totpData));
-      await redisClient.expire(redisKey, 30); // Sempre usar 30 segundos para o Redis
-
-      console.log("\n✅ CÓDIGO TOTP GERADO:");
-      console.log(`Código: ${code}`);
-      console.log(`Válido por: ${remainingTime} segundos`);
-      console.log("\nO código expirará em:");
-
-      // Contagem regressiva
-      for (let i = remainingTime; i > 0; i--) {
-        if (escPressed) break;
-        process.stdout.write(
-          `\r${i} segundos restantes... (Pressione ESC para sair)`
-        );
-        // Esperar 1 segundo
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-
-      if (!escPressed) {
-        console.log("\n\n⏱️ Código expirado! Gerando novo código...");
-      }
-    }
-
-    // Remover o listener e restaurar o modo do terminal
-    stdin.removeListener("data", keyListener);
-    stdin.setRawMode(false);
-    stdin.pause();
-  } catch (error) {
-    console.error("\n❌ ERRO AO GERAR CÓDIGO TOTP:");
-    console.error("Erro:", error.message);
-    // Restaurar o modo do terminal em caso de erro
-    stdin.setRawMode(false);
-    stdin.pause();
-  }
-
-  await menuPrincipal();
-}
-
 // Função para fazer login completo (3FA)
 async function fazerLogin() {
   console.log("\n=== LOGIN DE USUÁRIO ===");
@@ -504,98 +371,117 @@ async function fazerLogin() {
 
 // Função para enviar mensagem cifrada
 async function enviarMensagemCifrada(numeroCelular, chave, ivHex) {
-  console.log("\n=== ENVIO DE MENSAGEM CIFRADA ===");
+  let continuarEnviando = true;
+  
+  while (continuarEnviando) {
+    console.log("\n=== ENVIO DE MENSAGEM CIFRADA ===");
 
-  try {
-    // Solicitar a mensagem ao usuário
-    const mensagem = await pergunta(
-      "Digite a mensagem a ser enviada (cifrada): "
-    );
+    try {
+      // Solicitar a mensagem ao usuário
+      const mensagem = await pergunta(
+        "Digite a mensagem a ser enviada (cifrada): "
+      );
 
-    // Converter a chave e o IV para os formatos corretos
-    // A chave para AES-256-GCM deve ter exatamente 32 bytes
-    let chaveBuffer = Buffer.from(chave, "hex").slice(0, 32);
+      // Converter a chave e o IV para os formatos corretos
+      // A chave para AES-256-GCM deve ter exatamente 32 bytes
+      let chaveBuffer = Buffer.from(chave, "hex").slice(0, 32);
 
-    // Se a chave é menor que 32 bytes, preenchemos com zeros
-    if (chaveBuffer.length < 32) {
-      const novaChave = Buffer.alloc(32);
-      chaveBuffer.copy(novaChave);
-      chaveBuffer = novaChave;
-    }
+      // Se a chave é menor que 32 bytes, preenchemos com zeros
+      if (chaveBuffer.length < 32) {
+        const novaChave = Buffer.alloc(32);
+        chaveBuffer.copy(novaChave);
+        chaveBuffer = novaChave;
+      }
 
-    const ivBuffer = Buffer.from(ivHex, "hex");
+      const ivBuffer = Buffer.from(ivHex, "hex");
 
-    console.log(`Tamanho da chave: ${chaveBuffer.length} bytes`);
-    console.log(`Tamanho do IV: ${ivBuffer.length} bytes`);
+      console.log(`Tamanho da chave: ${chaveBuffer.length} bytes`);
+      console.log(`Tamanho do IV: ${ivBuffer.length} bytes`);
 
-    // Criar o cipher para criptografia AES-GCM
-    const cipher = crypto.createCipheriv("aes-256-gcm", chaveBuffer, ivBuffer);
+      // Criar o cipher para criptografia AES-GCM
+      const cipher = crypto.createCipheriv("aes-256-gcm", chaveBuffer, ivBuffer);
 
-    // Criptografar a mensagem
-    let encrypted = cipher.update(mensagem, "utf8", "hex");
-    encrypted += cipher.final("hex");
+      // Criptografar a mensagem
+      let encrypted = cipher.update(mensagem, "utf8", "hex");
+      encrypted += cipher.final("hex");
 
-    // Obter a tag de autenticação
-    const authTag = cipher.getAuthTag();
+      // Obter a tag de autenticação
+      const authTag = cipher.getAuthTag();
 
-    // Combinar o texto cifrado e a tag de autenticação
-    const encryptedMessage = encrypted + authTag.toString("hex");
+      // Combinar o texto cifrado e a tag de autenticação
+      const encryptedMessage = encrypted + authTag.toString("hex");
 
-    console.log("\nMensagem criptografada com sucesso!");
-    console.log("Detalhes técnicos da criptografia:");
-    console.log(`- Texto original (${mensagem.length} caracteres)`);
-    console.log(
-      `- Texto cifrado (${encrypted.length} caracteres hexadecimais)`
-    );
-    console.log(`- Tag de autenticação (${authTag.length} bytes)`);
-    console.log(
-      `- Total criptografado: ${encryptedMessage.length} caracteres hexadecimais`
-    );
-
-    const messageData = {
-      encrypted_message: encryptedMessage,
-      iv: ivHex,
-      numero_celular: numeroCelular,
-    };
-
-    // Log detalhado dos dados enviados
-    console.log("\n📤 DADOS CRIPTOGRAFADOS ENVIADOS:");
-    console.log(
-      `Message: ${encryptedMessage.slice(0, 30)}...${encryptedMessage.slice(
-        -30
-      )} (${encryptedMessage.length} caracteres)`
-    );
-    console.log(`IV: ${ivHex} (${ivHex.length} caracteres)`);
-    console.log(`Número Celular: ${numeroCelular}`);
-
-    console.log("Enviando para o servidor...");
-
-    // Enviar a mensagem criptografada ao servidor
-    const response = await axios.post(`${BASE_URL}/send-message`, messageData);
-
-    if (response.data.success) {
-      console.log("\n✅ MENSAGEM RECEBIDA PELO SERVIDOR!");
-      console.log(`Resposta: ${response.data.message}`);
+      console.log("\nMensagem criptografada com sucesso!");
+      console.log("Detalhes técnicos da criptografia:");
+      console.log(`- Texto original (${mensagem.length} caracteres)`);
       console.log(
-        `Mensagem descriptografada no servidor: ${response.data.decrypted_message}`
+        `- Texto cifrado (${encrypted.length} caracteres hexadecimais)`
       );
-    } else {
-      console.log("\n❌ FALHA AO ENVIAR MENSAGEM:");
-      console.log(response.data.message);
-    }
-  } catch (error) {
-    console.error("\n❌ ERRO AO ENVIAR MENSAGEM CIFRADA:");
-    if (error.response) {
-      console.error(`Status: ${error.response.status}`);
-      console.error(
-        "Mensagem:",
-        error.response.data.message || JSON.stringify(error.response.data)
+      console.log(`- Tag de autenticação (${authTag.length} bytes)`);
+      console.log(
+        `- Total criptografado: ${encryptedMessage.length} caracteres hexadecimais`
       );
-    } else {
-      console.error("Erro:", error.message);
-      console.error("Detalhes do erro:", error);
+
+      const messageData = {
+        encrypted_message: encryptedMessage,
+        iv: ivHex,
+        numero_celular: numeroCelular,
+      };
+
+      // Log detalhado dos dados enviados
+      console.log("\n📤 DADOS CRIPTOGRAFADOS ENVIADOS:");
+      console.log(
+        `Message: ${encryptedMessage.slice(0, 30)}...${encryptedMessage.slice(
+          -30
+        )} (${encryptedMessage.length} caracteres)`
+      );
+      console.log(`IV: ${ivHex} (${ivHex.length} caracteres)`);
+      console.log(`Número Celular: ${numeroCelular}`);
+
+      console.log("Enviando para o servidor...");
+
+      // Enviar a mensagem criptografada ao servidor
+      const response = await axios.post(`${BASE_URL}/send-message`, messageData);
+
+      if (response.data.success) {
+        console.log("\n✅ MENSAGEM RECEBIDA PELO SERVIDOR!");
+        console.log(`Resposta: ${response.data.message}`);
+        console.log(
+          `Mensagem descriptografada no servidor: ${response.data.decrypted_message}`
+        );
+        
+        // Perguntar se o usuário deseja enviar outra mensagem
+        const enviarOutra = await pergunta("\nDeseja enviar outra mensagem cifrada? (s/n): ");
+        continuarEnviando = enviarOutra.toLowerCase() === "s";
+      } else {
+        console.log("\n❌ FALHA AO ENVIAR MENSAGEM:");
+        console.log(response.data.message);
+        
+        // Em caso de falha, também perguntar se deseja tentar novamente
+        const tentarNovamente = await pergunta("\nDeseja tentar enviar outra mensagem? (s/n): ");
+        continuarEnviando = tentarNovamente.toLowerCase() === "s";
+      }
+    } catch (error) {
+      console.error("\n❌ ERRO AO ENVIAR MENSAGEM CIFRADA:");
+      if (error.response) {
+        console.error(`Status: ${error.response.status}`);
+        console.error(
+          "Mensagem:",
+          error.response.data.message || JSON.stringify(error.response.data)
+        );
+      } else {
+        console.error("Erro:", error.message);
+        console.error("Detalhes do erro:", error);
+      }
+      
+      // Em caso de erro, perguntar se deseja tentar novamente
+      const tentarNovamente = await pergunta("\nDeseja tentar enviar outra mensagem? (s/n): ");
+      continuarEnviando = tentarNovamente.toLowerCase() === "s";
     }
   }
+  
+  // Retornar ao menu principal quando o usuário não quiser mais enviar mensagens
+  console.log("\nVoltando ao menu principal...");
 }
 
 // Função do menu principal
@@ -605,9 +491,6 @@ async function menuPrincipal() {
   console.log("==============================");
   console.log("1. Registrar novo usuário");
   console.log("2. Login completo (3FA)");
-  console.log("3. Testar conexão Redis");
-  console.log("4. Verificar secret armazenado");
-  console.log("5. Solicitar código TOTP");
   console.log("0. Sair");
 
   const opcao = await pergunta("\nEscolha uma opção: ");
@@ -618,15 +501,6 @@ async function menuPrincipal() {
       break;
     case "2":
       await fazerLogin();
-      break;
-    case "3":
-      await verificarSecret();
-      break;
-    case "4":
-      await solicitarTOTP();
-      break;
-    case "5":
-      await testarRedis();
       break;
     case "0":
       console.log("\nEncerrando cliente...");
