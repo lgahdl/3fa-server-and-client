@@ -22,8 +22,7 @@
     "hono": "^4.7.9",
     "otplib": "^12.0.1",
     "pg": "^8.16.0",
-    "redis": "^5.0.1",
-    "server": "file:../../../Segurança de Redes/Tarefa Prática 2/server"
+    "redis": "^5.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.18",

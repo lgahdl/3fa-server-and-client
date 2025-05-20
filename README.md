@@ -28,7 +28,7 @@ npm install
 
 ### 2. Configuração do Ambiente
 
-Crie um arquivo `.env` na raiz do diretório `server/` com as seguintes variáveis:
+Crie um arquivo `.env` na raiz do diretório com as seguintes variáveis:
 
 ```
 # Porta do servidor
@@ -62,8 +62,8 @@ docker-compose up -d
 Este comando iniciará:
 - PostgreSQL (porta 5433)
 - PgAdmin (porta 8080)
-- Redis do Servidor (porta 6381)
-- Redis do Cliente (porta 6380)
+- Redis do Servidor (porta 6380)
+- Redis do Cliente (porta 6381)
 
 Verifique se os containers estão rodando:
 
@@ -76,7 +76,7 @@ docker-compose ps
 Após os containers estarem em execução, inicie o servidor:
 
 ```bash
-cd server
+
 npm run dev
 ```
 
@@ -87,7 +87,7 @@ O servidor estará disponível em `http://localhost:3000`
 Em um novo terminal, execute o cliente interativo:
 
 ```bash
-cd server
+
 npm run client
 ```
 
