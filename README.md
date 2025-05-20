@@ -227,7 +227,14 @@ sequenceDiagram
     Note over Servidor: Deriva chave simétrica usando PBKDF2
     Note over Servidor: Gera IV aleatório para AES-GCM
     
+    Note over Servidor: Gera chave de sessão única
+    
+    Servidor->>Redis: Armazena chave de sessão (com TTL)
+    Redis-->>Servidor: Confirmação de armazenamento
+    
     Servidor-->>Cliente: Autenticação 3FA completa (chave de sessão, IV)
+    
+    Note over Cliente,Servidor: Chave de sessão usada para autenticar requisições subsequentes
 ```
 
 ### 3. Fluxo de Mensagem Criptografada
