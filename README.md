@@ -218,23 +218,29 @@ sequenceDiagram
     
     Note over Cliente: Recupera secret do Redis local
     Note over Cliente: Gera código TOTP usando o secret
+    Note over Cliente: Opção de usar código gerado ou inserir manualmente
     
     Cliente->>Servidor: POST /verify-totp (número_celular, código TOTP)
     Servidor->>Redis: Recupera secret do usuário
     Redis-->>Servidor: Secret do usuário
     
     Note over Servidor: Verifica código TOTP usando secret
-    Note over Servidor: Deriva chave simétrica usando PBKDF2
-    Note over Servidor: Gera IV aleatório para AES-GCM
     
-    Note over Servidor: Gera chave de sessão única
+    Note over Servidor: Gera salt de derivação
+    Note over Servidor: Armazena TOTP e salt na sessão
     
-    Servidor->>Redis: Armazena chave de sessão (com TTL)
-    Redis-->>Servidor: Confirmação de armazenamento
+    Servidor->>Redis: Salva {totp_code, derivation_salt, timestamp} com TTL de 5 min
+    Redis-->>Servidor: Confirmação
     
-    Servidor-->>Cliente: Autenticação 3FA completa (chave de sessão, IV)
+    Servidor-->>Cliente: Envia salt de derivação
     
-    Note over Cliente,Servidor: Chave de sessão usada para autenticar requisições subsequentes
+    Note over Cliente,Servidor: Ambos derivam chave de sessão e IV usando:
+    Note over Cliente,Servidor: PBKDF2(TOTP + secret + salt, 100.000 iterações)
+    
+    Note over Cliente: Armazena chaves derivadas localmente
+    Note over Servidor: Mantém TOTP na sessão para futuras mensagens
+    
+    Servidor-->>Cliente: Autenticação 3FA completa
 ```
 
 ### 3. Fluxo de Mensagem Criptografada
@@ -247,10 +253,7 @@ sequenceDiagram
 
     Note right of Cliente: Após Login 3FA bem-sucedido
 
-    Note over Servidor: Armazena código TOTP usado na verificação
-    Servidor->>Redis: Salva {totp_code, derivation_salt, iv, timestamp} com TTL de 5 min
-    
-    Note over Cliente: Possui chave de sessão e IV do servidor
+    Note over Cliente: Recupera chaves de sessão do Redis local
     Note over Cliente: Usuário digita mensagem
     
     Note over Cliente: Criptografa mensagem com AES-256-GCM
@@ -258,11 +261,19 @@ sequenceDiagram
     
     Cliente->>Servidor: POST /send-message (mensagem cifrada, IV, número_celular)
     
-    Servidor->>Redis: Recupera secret e dados da sessão do usuário
-    Redis-->>Servidor: Secret e dados da sessão
+    Servidor->>Redis: Recupera dados da sessão (TOTP, salt)
+    Redis-->>Servidor: Dados da sessão
     
-    Note over Servidor: Reconstrói a mesma chave simétrica usando PBKDF2
-    Note over Servidor: Descriptografa a mensagem
+    Note over Servidor: Recupera secret do usuário
+    Servidor->>Redis: Busca secret pelo número_celular
+    Redis-->>Servidor: Secret do usuário
+    
+    Note over Servidor: Deriva chave e IV usando:
+    Note over Servidor: PBKDF2(TOTP armazenado + secret + salt)
+    
+    Note over Servidor: Verifica se IV derivado corresponde ao IV recebido
+    
+    Note over Servidor: Descriptografa a mensagem usando chave derivada
     
     Servidor-->>Cliente: Confirmação e mensagem descriptografada
 ``` 

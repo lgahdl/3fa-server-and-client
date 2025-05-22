@@ -80,15 +80,16 @@ export class EncryptUtils {
    * Deriva uma chave simétrica para criptografia usando PBKDF2
    * @param keyMaterial Material para derivação da chave (ex: TOTP + secret)
    * @param salt Salt para a derivação
+   * @param keyLength Tamanho da chave em bytes (opcional, padrão 32)
    * @returns Promise com a chave derivada como Buffer
    */
-  static async deriveSymmetricKey(keyMaterial: string, salt: Buffer): Promise<Buffer> {
+  static async deriveSymmetricKey(keyMaterial: string, salt: Buffer, keyLength: number = 32): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
       crypto.pbkdf2(
         keyMaterial,
         salt,
         PBKDF2_ITERATIONS,
-        PBKDF2_KEYLEN,
+        keyLength,
         PBKDF2_DIGEST,
         (err, derivedKey) => {
           if (err) reject(err);

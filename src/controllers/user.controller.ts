@@ -293,37 +293,28 @@ export class UserController {
       }
       
       // Gerar um salt aleatório para PBKDF2
-      const derivationSalt = crypto.randomBytes(16);
+      const derivationSalt = crypto.randomBytes(16).toString('hex');
       
-      // Derivar chave simétrica a partir do código TOTP + secret usando PBKDF2
-      const keyMaterial = `${body.totp_code}${secret}`;
-      
-      // Usar função do EncryptUtils para derivar a chave simétrica
-      const symmetricKeyBuffer = await EncryptUtils.deriveSymmetricKey(keyMaterial, derivationSalt);
-      const symmetricKey = symmetricKeyBuffer.toString('hex');
-      
-      // Gerar um IV (Initialization Vector) aleatório
-      const iv = EncryptUtils.generateIV(); // 16 bytes para AES
-      
-      // Armazenar o código TOTP usado na autenticação junto com a sessão
-      // usando uma chave composta no Redis para associar ao usuário
+      // Armazenar o salt de derivação, o TOTP e o timestamp no Redis
       const sessionKey = `session:${body.numero_celular}`;
       const sessionData = {
-        totp_code: body.totp_code,
-        derivation_salt: derivationSalt.toString('hex'), // Salvar o salt usado na derivação
-        iv: iv.toString('hex'),
+        derivationSalt: derivationSalt,
+        totpCode: body.totp_code,
         timestamp: Date.now()
       };
       
       // Armazenar os dados da sessão no Redis com TTL de 5 minutos (300 segundos)
       await RedisService.set(sessionKey, JSON.stringify(sessionData), 300);
-      console.log(`Dados da sessão armazenados para ${body.numero_celular}:`, sessionData);
+      console.log(`Dados da sessão armazenados para ${body.numero_celular}:`, {
+        ...sessionData,
+        totpCode: '***'
+      });
       
+      // Retornar apenas o salt de derivação para o cliente
       return c.json({
         success: true,
         message: 'Autenticação completa! 3FA bem-sucedida.',
-        session_key: symmetricKey,
-        iv: iv.toString('hex')
+        derivation_salt: derivationSalt
       });
       
     } catch (error) {
@@ -344,13 +335,20 @@ export class UserController {
       // Obter dados do corpo da requisição
       const body = await c.req.json();
       
-      // Validar dados recebidos
+      // LOG: Exibir corpo da requisição recebido
+      console.log('--- [receiveMessage] Corpo da requisição recebido ---');
+      console.log(body);
+      
+      // Validar dados recebidos (não precisamos mais do TOTP no corpo)
       if (!body.encrypted_message || !body.iv || !body.numero_celular) {
         return c.json({
           success: false,
           message: 'Dados incompletos. Mensagem criptografada, IV e número de celular são obrigatórios.'
         }, 400);
       }
+      
+      // LOG: Exibir número de celular recebido
+      console.log(`[receiveMessage] Número de celular recebido: ${body.numero_celular}`);
       
       // Buscar o secret do usuário no Redis
       const secret = await RedisService.get(body.numero_celular);
@@ -366,6 +364,10 @@ export class UserController {
       const sessionKey = `session:${body.numero_celular}`;
       const sessionDataJson = await RedisService.get(sessionKey);
       
+      // LOG: Exibir conteúdo bruto da sessão lida do Redis
+      console.log(`[receiveMessage] Conteúdo bruto da sessão do Redis para ${sessionKey}:`);
+      console.log(sessionDataJson);
+      
       if (!sessionDataJson) {
         return c.json({
           success: false,
@@ -376,21 +378,44 @@ export class UserController {
       // Converter os dados da sessão de JSON para objeto
       const sessionData = JSON.parse(sessionDataJson);
       
-      // Usar o código TOTP armazenado durante a autenticação e o salt de derivação
-      const savedTOTP = sessionData.totp_code;
-      const derivationSalt = Buffer.from(sessionData.derivation_salt, 'hex');
+      // Verificar se temos o TOTP armazenado na sessão
+      if (!sessionData.totpCode) {
+        return c.json({
+          success: false,
+          message: 'Sessão inválida. Faça login novamente.'
+        }, 401);
+      }
       
-      console.log(`Usando código TOTP armazenado: ${savedTOTP}`);
+      // Usar o TOTP armazenado na sessão e o salt de derivação
+      const derivationSalt = Buffer.from(sessionData.derivationSalt, 'hex');
+      const totpCode = sessionData.totpCode;
       
-      // Derivar chave simétrica usando o EncryptUtils
-      const keyMaterial = `${savedTOTP}${secret}`;
-      const symmetricKey = await EncryptUtils.deriveSymmetricKey(keyMaterial, derivationSalt);
+      console.log('Usando TOTP armazenado na sessão');
       
-      console.log(`Tamanho da chave: ${symmetricKey.length} bytes`);
+      // Derivar chave mestra usando o EncryptUtils (48 bytes: 32 para chave + 16 para IV)
+      const keyMaterial = `${totpCode}${secret}`;
+      const masterKey = await EncryptUtils.deriveSymmetricKey(keyMaterial, derivationSalt, 48);
       
-      // Converter IV de hex para Buffer
-      const ivBuffer = Buffer.from(body.iv, 'hex');
-      console.log(`Tamanho do IV: ${ivBuffer.length} bytes`);
+      // Separar a chave mestra em chave de sessão (32 bytes) e IV (16 bytes)
+      const symmetricKey = masterKey.slice(0, 32);
+      const derivedIV = masterKey.slice(32, 48);
+      
+      console.log(`Tamanho da chave mestra: ${masterKey.length} bytes`);
+      console.log(`Tamanho da chave de sessão: ${symmetricKey.length} bytes`);
+      console.log(`Tamanho do IV derivado: ${derivedIV.length} bytes`);
+      
+      console.log(`[receiveMessage] symmetricKey (hex): ${symmetricKey.toString('hex')}`);
+      console.log(`[receiveMessage] derivedIV (hex): ${derivedIV.toString('hex')}`);
+      
+      // Verificar se o IV derivado corresponde ao IV enviado pelo cliente
+      const clientIV = Buffer.from(body.iv, 'hex');
+      if (!derivedIV.equals(clientIV)) {
+        console.error('IV derivado não corresponde ao IV enviado pelo cliente');
+        return c.json({
+          success: false,
+          message: 'Falha na verificação do IV. Possível tentativa de manipulação.'
+        }, 400);
+      }
       
       // Descriptografar a mensagem
       try {
@@ -400,7 +425,7 @@ export class UserController {
         const authTag = encryptedDataBuffer.slice(-16);
         
         // Usar a função de descriptografia do EncryptUtils
-        const message = EncryptUtils.decrypt(ciphertext, authTag, symmetricKey, ivBuffer);
+        const message = EncryptUtils.decrypt(ciphertext, authTag, symmetricKey, derivedIV);
         
         return c.json({
           success: true,
